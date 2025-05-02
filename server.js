@@ -62,8 +62,26 @@ const supabase = createClient(
 )
 
 // Health check endpoint
+app.get('/', (req, res) => {
+  res.json({
+    status: 'ok',
+    message: 'WhisperAI Backend API is running',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString()
+  })
+})
+
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' })
+  res.json({
+    status: 'ok',
+    message: 'WhisperAI Backend API is healthy',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString(),
+    services: {
+      stripe: !!process.env.STRIPE_SECRET_KEY,
+      supabase: !!process.env.SUPABASE_URL && !!process.env.SUPABASE_SERVICE_ROLE_KEY
+    }
+  })
 })
 
 // Create or verify customer endpoint
