@@ -352,6 +352,40 @@ app.get('/auth/callback', async (req, res) => {
   }
 })
 
+// Verify session endpoint
+app.post('/api/verify-session', async (req, res) => {
+  try {
+    const { sessionId } = req.body
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Missing session ID' })
+    }
+
+    console.log('Verifying session:', sessionId)
+
+    const session = await stripe.checkout.sessions.retrieve(sessionId)
+    console.log('Session status:', session.status)
+
+    if (session.status === 'complete') {
+      // Update user's subscription status in your database
+      // This is where you would update your user's subscription status
+      // based on the session data
+
+      return res.json({ 
+        status: 'success',
+        message: 'Session verified successfully'
+      })
+    } else {
+      return res.status(400).json({ 
+        error: 'Session not complete',
+        status: session.status
+      })
+    }
+  } catch (error) {
+    console.error('Error verifying session:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack)
