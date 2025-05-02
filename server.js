@@ -211,6 +211,32 @@ app.post('/api/webhook-test', express.raw({ type: 'application/json' }), (req, r
   res.json({ received: true })
 })
 
+// Check subscription endpoint
+app.get('/api/check-subscription/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params
+    console.log('Checking subscription for user:', userId)
+
+    const { data: subscriptions, error } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1)
+
+    if (error) {
+      console.error('Error fetching subscription:', error)
+      return res.status(500).json({ error: 'Database error' })
+    }
+
+    console.log('Found subscriptions:', subscriptions)
+    res.json({ subscriptions })
+  } catch (error) {
+    console.error('Error checking subscription:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // Stripe webhook endpoint
 app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
   const sig = req.headers['stripe-signature']
