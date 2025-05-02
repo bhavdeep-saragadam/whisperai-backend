@@ -26,13 +26,18 @@ const port = process.env.PORT || 3000
 
 // Middleware
 app.use(cors({
-  origin: process.env.NODE_ENV === 'development' 
-    ? ['http://localhost:8080', 'http://localhost:3000', 'http://localhost:5173'] 
-    : ['https://whisperai-lemon.vercel.app', process.env.FRONTEND_URL].filter(Boolean),
+  origin: '*', // Allow all origins temporarily for debugging
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'stripe-signature', 'Accept']
 }))
+
+// Add request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`)
+  console.log('Headers:', req.headers)
+  next()
+})
 
 // Parse JSON bodies for all routes except webhook
 app.use((req, res, next) => {
