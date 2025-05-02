@@ -447,6 +447,27 @@ app.post('/api/verify-session', async (req, res) => {
   }
 })
 
+// Check subscriptions table structure
+app.get('/api/check-subscriptions', async (req, res) => {
+  try {
+    const { data: tableInfo, error: tableError } = await supabase
+      .from('subscriptions')
+      .select('*')
+      .limit(1)
+
+    if (tableError) {
+      console.error('Error checking subscriptions table:', tableError)
+      return res.status(500).json({ error: 'Database error' })
+    }
+
+    console.log('Subscriptions table structure:', tableInfo)
+    res.json({ tableInfo })
+  } catch (error) {
+    console.error('Error checking subscriptions table:', error)
+    res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack)
