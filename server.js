@@ -218,123 +218,158 @@ app.get('/api/check-subscription/:userId', async (req, res) => {
     console.log('Checking subscription for user:', userId)
 
     // First check if user exists in auth.users
-    const { data: authUser, error: authError } = await supabase.auth.admin.getUserById(userId)
-    
-    if (authError) {
-      console.error('Error fetching auth user:', authError)
-      return res.status(500).json({ error: 'Auth error' })
-    }
-
-    if (!authUser) {
-      console.log('No auth user found')
-      return res.json({ subscriptions: [] })
-    }
-
-    console.log('Found auth user:', authUser)
-
-    // Get or create Stripe customer
-    let customerId = null
     try {
-      const { data: user } = await supabase
-        .from('users')
-        .select('stripe_customer_id')
-        .eq('id', userId)
-        .single()
+      const { data: authUser, error: authError } = await supabase.auth.admin.getUserById(userId)
+      
+      if (authError) {
+        console.error('Error fetching auth user:', authError)
+        return res.status(500).json({ error: 'Auth error', details: authError })
+      }
 
-      customerId = user?.stripe_customer_id
+      if (!authUser) {
+        console.log('No auth user found')
+        return res.json({ subscriptions: [] })
+      }
 
-      if (!customerId) {
-        // Create new customer in Stripe
-        const customer = await stripe.customers.create({
-          email: authUser.email,
-          metadata: {
-            userId,
-          },
-        })
-        customerId = customer.id
+      console.log('Found auth user:', authUser)
 
-        // Store customer ID in Supabase
-        const { error: updateError } = await supabase
+      // Get or create Stripe customer
+      let customerId = null
+      try {
+        const { data: user, error: userError } = await supabase
           .from('users')
-          .upsert({
-            id: userId,
-            stripe_customer_id: customerId,
+          .select('stripe_customer_id')
+          .eq('id', userId)
+          .single()
+
+        if (userError) {
+          console.error('Error fetching user from users table:', userError)
+          // Try to create the user record
+          const { error: createError } = await supabase
+            .from('users')
+            .insert({
+              id: userId,
+              email: authUser.email,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+
+          if (createError) {
+            console.error('Error creating user record:', createError)
+            return res.status(500).json({ error: 'Database error', details: createError })
+          }
+
+          // Try fetching again
+          const { data: newUser, error: newUserError } = await supabase
+            .from('users')
+            .select('stripe_customer_id')
+            .eq('id', userId)
+            .single()
+
+          if (newUserError) {
+            console.error('Error fetching new user record:', newUserError)
+            return res.status(500).json({ error: 'Database error', details: newUserError })
+          }
+
+          user = newUser
+        }
+
+        customerId = user?.stripe_customer_id
+
+        if (!customerId) {
+          // Create new customer in Stripe
+          const customer = await stripe.customers.create({
             email: authUser.email,
+            metadata: {
+              userId,
+            },
+          })
+          customerId = customer.id
+
+          // Store customer ID in Supabase
+          const { error: updateError } = await supabase
+            .from('users')
+            .update({
+              stripe_customer_id: customerId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', userId)
+
+          if (updateError) {
+            console.error('Error updating user with Stripe customer ID:', updateError)
+            return res.status(500).json({ error: 'Database error', details: updateError })
+          }
+        }
+      } catch (error) {
+        console.error('Error handling customer:', error)
+        return res.status(500).json({ error: 'Stripe error', details: error.message })
+      }
+
+      console.log('Using customer ID:', customerId)
+
+      // Get subscriptions from Stripe
+      const subscriptions = await stripe.subscriptions.list({
+        customer: customerId,
+        status: 'active',
+        limit: 1
+      })
+
+      console.log('Found Stripe subscriptions:', subscriptions.data)
+
+      if (subscriptions.data.length > 0) {
+        const subscription = subscriptions.data[0]
+        
+        // Update subscription in Supabase
+        const { data: subscriptionData, error: upsertError } = await supabase
+          .from('subscriptions')
+          .upsert({
+            user_id: userId,
+            stripe_customer_id: customerId,
+            stripe_subscription_id: subscription.id,
+            status: subscription.status,
+            price_id: subscription.items.data[0].price.id,
+            quantity: subscription.items.data[0].quantity,
+            cancel_at_period_end: subscription.cancel_at_period_end,
+            current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+            current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+            ended_at: subscription.ended_at ? new Date(subscription.ended_at * 1000).toISOString() : null,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'stripe_subscription_id'
           })
 
-        if (updateError) {
-          console.error('Error updating user:', updateError)
-          return res.status(500).json({ error: 'Database error' })
+        if (upsertError) {
+          console.error('Error upserting subscription:', upsertError)
+          return res.status(500).json({ error: 'Database error', details: upsertError })
         }
+
+        console.log('Successfully updated subscription:', subscriptionData)
+        return res.json({ subscriptions: [subscriptionData] })
       }
-    } catch (error) {
-      console.error('Error handling customer:', error)
-      return res.status(500).json({ error: 'Stripe error' })
-    }
 
-    console.log('Using customer ID:', customerId)
-
-    // Get subscriptions from Stripe
-    const subscriptions = await stripe.subscriptions.list({
-      customer: customerId,
-      status: 'active',
-      limit: 1
-    })
-
-    console.log('Found Stripe subscriptions:', subscriptions.data)
-
-    if (subscriptions.data.length > 0) {
-      const subscription = subscriptions.data[0]
-      
-      // Update subscription in Supabase
-      const { data: subscriptionData, error: upsertError } = await supabase
+      // If no active subscriptions in Stripe, check Supabase
+      const { data: dbSubscriptions, error: dbError } = await supabase
         .from('subscriptions')
-        .upsert({
-          user_id: userId,
-          stripe_customer_id: customerId,
-          stripe_subscription_id: subscription.id,
-          status: subscription.status,
-          price_id: subscription.items.data[0].price.id,
-          quantity: subscription.items.data[0].quantity,
-          cancel_at_period_end: subscription.cancel_at_period_end,
-          current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
-          current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
-          ended_at: subscription.ended_at ? new Date(subscription.ended_at * 1000).toISOString() : null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        }, {
-          onConflict: 'stripe_subscription_id'
-        })
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1)
 
-      if (upsertError) {
-        console.error('Error upserting subscription:', upsertError)
-        return res.status(500).json({ error: 'Database error' })
+      if (dbError) {
+        console.error('Error fetching subscriptions from database:', dbError)
+        return res.status(500).json({ error: 'Database error', details: dbError })
       }
 
-      console.log('Successfully updated subscription:', subscriptionData)
-      return res.json({ subscriptions: [subscriptionData] })
+      console.log('Found subscriptions in database:', dbSubscriptions)
+      res.json({ subscriptions: dbSubscriptions })
+    } catch (error) {
+      console.error('Error in auth check:', error)
+      return res.status(500).json({ error: 'Auth error', details: error.message })
     }
-
-    // If no active subscriptions in Stripe, check Supabase
-    const { data: dbSubscriptions, error } = await supabase
-      .from('subscriptions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-
-    if (error) {
-      console.error('Error fetching subscription:', error)
-      return res.status(500).json({ error: 'Database error' })
-    }
-
-    console.log('Found subscriptions in database:', dbSubscriptions)
-    res.json({ subscriptions: dbSubscriptions })
   } catch (error) {
     console.error('Error checking subscription:', error)
-    res.status(500).json({ error: 'Internal server error' })
+    res.status(500).json({ error: 'Internal server error', details: error.message })
   }
 })
 
