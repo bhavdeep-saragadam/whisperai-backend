@@ -31,7 +31,7 @@ app.use(cors({
     : ['https://whisperai-lemon.vercel.app', process.env.FRONTEND_URL].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'stripe-signature']
+  allowedHeaders: ['Content-Type', 'Authorization', 'stripe-signature', 'Accept']
 }))
 
 // Parse JSON bodies for all routes except webhook
