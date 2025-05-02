@@ -219,6 +219,7 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
   try {
     console.log('Webhook received with signature:', sig)
     console.log('Webhook headers:', req.headers)
+    console.log('Webhook body:', req.body.toString())
     
     event = stripe.webhooks.constructEvent(
       req.body,
@@ -238,7 +239,8 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
         console.log('Processing completed checkout session:', {
           sessionId: session.id,
           customerId: session.customer,
-          subscriptionId: session.subscription
+          subscriptionId: session.subscription,
+          metadata: session.metadata
         })
 
         // Get user ID from customer metadata
@@ -257,7 +259,8 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
         console.log('Subscription details:', {
           id: subscription.id,
           status: subscription.status,
-          priceId: subscription.items.data[0].price.id
+          priceId: subscription.items.data[0].price.id,
+          metadata: subscription.metadata
         })
 
         // Update subscription in Supabase
