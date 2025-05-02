@@ -26,7 +26,9 @@ const port = process.env.PORT || 3000
 
 // Middleware
 app.use(cors({
-  origin: '*', // Allow all origins temporarily for debugging
+  origin: process.env.NODE_ENV === 'development' 
+    ? ['http://localhost:8080', 'http://localhost:3000', 'http://localhost:5173'] 
+    : ['https://whisperai-lemon.vercel.app'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'stripe-signature', 'Accept']
@@ -36,6 +38,7 @@ app.use(cors({
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`)
   console.log('Headers:', req.headers)
+  console.log('Origin:', req.headers.origin)
   next()
 })
 
