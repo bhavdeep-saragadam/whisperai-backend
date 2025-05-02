@@ -221,6 +221,16 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
     console.log('Webhook headers:', req.headers)
     console.log('Webhook body:', req.body.toString())
     
+    if (!sig) {
+      console.error('No signature found in webhook request')
+      return res.status(400).send('No signature found')
+    }
+
+    if (!process.env.STRIPE_WEBHOOK_SECRET) {
+      console.error('No webhook secret configured')
+      return res.status(500).send('Webhook secret not configured')
+    }
+    
     event = stripe.webhooks.constructEvent(
       req.body,
       sig,
