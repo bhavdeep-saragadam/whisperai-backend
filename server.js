@@ -236,6 +236,24 @@ app.get('/api/check-subscription/:userId', async (req, res) => {
       // Get or create Stripe customer
       let customerId = null
       try {
+        // First try to create the user record if it doesn't exist
+        const { error: createError } = await supabase
+          .from('users')
+          .insert({
+            id: userId,
+            email: authUser.email,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .select()
+          .single()
+
+        if (createError && !createError.message.includes('duplicate key')) {
+          console.error('Error creating user record:', createError)
+          return res.status(500).json({ error: 'Database error', details: createError })
+        }
+
+        // Now fetch the user record
         const { data: user, error: userError } = await supabase
           .from('users')
           .select('stripe_customer_id')
@@ -243,35 +261,8 @@ app.get('/api/check-subscription/:userId', async (req, res) => {
           .single()
 
         if (userError) {
-          console.error('Error fetching user from users table:', userError)
-          // Try to create the user record
-          const { error: createError } = await supabase
-            .from('users')
-            .insert({
-              id: userId,
-              email: authUser.email,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            })
-
-          if (createError) {
-            console.error('Error creating user record:', createError)
-            return res.status(500).json({ error: 'Database error', details: createError })
-          }
-
-          // Try fetching again
-          const { data: newUser, error: newUserError } = await supabase
-            .from('users')
-            .select('stripe_customer_id')
-            .eq('id', userId)
-            .single()
-
-          if (newUserError) {
-            console.error('Error fetching new user record:', newUserError)
-            return res.status(500).json({ error: 'Database error', details: newUserError })
-          }
-
-          user = newUser
+          console.error('Error fetching user record:', userError)
+          return res.status(500).json({ error: 'Database error', details: userError })
         }
 
         customerId = user?.stripe_customer_id
