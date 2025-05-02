@@ -168,6 +168,9 @@ app.post('/api/create-checkout-session', async (req, res) => {
       frontendUrl: process.env.FRONTEND_URL
     })
 
+    const frontendUrl = process.env.FRONTEND_URL || 'https://whisperai-lemon.vercel.app'
+    console.log('Using frontend URL:', frontendUrl)
+
     const session = await stripe.checkout.sessions.create({
       customer: customerId,
       payment_method_types: ['card'],
@@ -178,8 +181,8 @@ app.post('/api/create-checkout-session', async (req, res) => {
         },
       ],
       mode: 'subscription',
-      success_url: `${process.env.FRONTEND_URL || 'https://whisperai-lemon.vercel.app'}/profile?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL || 'https://whisperai-lemon.vercel.app'}/pricing`,
+      success_url: `${frontendUrl}/profile?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${frontendUrl}/pricing`,
       metadata: {
         testMode: testMode ? 'true' : 'false',
         userId: req.body.userId
