@@ -233,20 +233,16 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
 
   try {
     switch (event.type) {
-      case 'customer.subscription.created':
-      case 'customer.subscription.updated':
-        const subscription = event.data.object
-        const customerId = subscription.customer
-        console.log('Processing subscription:', {
-          type: event.type,
-          subscriptionId: subscription.id,
-          status: subscription.status,
-          customerId,
-          metadata: subscription.metadata
+      case 'checkout.session.completed':
+        const session = event.data.object
+        console.log('Processing completed checkout session:', {
+          sessionId: session.id,
+          customerId: session.customer,
+          subscriptionId: session.subscription
         })
 
         // Get user ID from customer metadata
-        const customer = await stripe.customers.retrieve(customerId)
+        const customer = await stripe.customers.retrieve(session.customer)
         const userId = customer.metadata.userId
 
         if (!userId) {
@@ -256,12 +252,20 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
 
         console.log('Found user ID:', userId)
 
+        // Get subscription details
+        const subscription = await stripe.subscriptions.retrieve(session.subscription)
+        console.log('Subscription details:', {
+          id: subscription.id,
+          status: subscription.status,
+          priceId: subscription.items.data[0].price.id
+        })
+
         // Update subscription in Supabase
         const { data: subscriptionData, error: upsertError } = await supabase
           .from('subscriptions')
           .upsert({
             user_id: userId,
-            stripe_customer_id: customerId,
+            stripe_customer_id: session.customer,
             stripe_subscription_id: subscription.id,
             status: subscription.status,
             price_id: subscription.items.data[0].price.id,
@@ -282,6 +286,57 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), async (req, 
         }
 
         console.log('Successfully updated subscription:', subscriptionData)
+        break
+
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+        const subscriptionEvent = event.data.object
+        const subscriptionCustomerId = subscriptionEvent.customer
+        console.log('Processing subscription event:', {
+          type: event.type,
+          subscriptionId: subscriptionEvent.id,
+          status: subscriptionEvent.status,
+          customerId: subscriptionCustomerId,
+          metadata: subscriptionEvent.metadata
+        })
+
+        // Get user ID from customer metadata
+        const subscriptionCustomer = await stripe.customers.retrieve(subscriptionCustomerId)
+        const subscriptionUserId = subscriptionCustomer.metadata.userId
+
+        if (!subscriptionUserId) {
+          console.error('No user ID found in customer metadata')
+          return res.status(400).json({ error: 'No user ID found' })
+        }
+
+        console.log('Found user ID:', subscriptionUserId)
+
+        // Update subscription in Supabase
+        const { data: updatedSubscriptionData, error: updatedUpsertError } = await supabase
+          .from('subscriptions')
+          .upsert({
+            user_id: subscriptionUserId,
+            stripe_customer_id: subscriptionCustomerId,
+            stripe_subscription_id: subscriptionEvent.id,
+            status: subscriptionEvent.status,
+            price_id: subscriptionEvent.items.data[0].price.id,
+            quantity: subscriptionEvent.items.data[0].quantity,
+            cancel_at_period_end: subscriptionEvent.cancel_at_period_end,
+            current_period_start: new Date(subscriptionEvent.current_period_start * 1000).toISOString(),
+            current_period_end: new Date(subscriptionEvent.current_period_end * 1000).toISOString(),
+            ended_at: subscriptionEvent.ended_at ? new Date(subscriptionEvent.ended_at * 1000).toISOString() : null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'stripe_subscription_id'
+          })
+
+        if (updatedUpsertError) {
+          console.error('Error upserting subscription:', updatedUpsertError)
+          return res.status(500).json({ error: 'Database error' })
+        }
+
+        console.log('Successfully updated subscription:', updatedSubscriptionData)
         break
 
       case 'customer.subscription.deleted':
