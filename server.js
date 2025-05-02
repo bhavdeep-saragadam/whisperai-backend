@@ -164,7 +164,8 @@ app.post('/api/create-checkout-session', async (req, res) => {
     console.log('Creating checkout session:', {
       priceId,
       customerId,
-      testMode
+      testMode,
+      frontendUrl: process.env.FRONTEND_URL
     })
 
     const session = await stripe.checkout.sessions.create({
@@ -177,17 +178,19 @@ app.post('/api/create-checkout-session', async (req, res) => {
         },
       ],
       mode: 'subscription',
-      success_url: `${process.env.FRONTEND_URL}/profile?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL}/pricing`,
+      success_url: `${process.env.FRONTEND_URL || 'https://whisperai-lemon.vercel.app'}/profile?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.FRONTEND_URL || 'https://whisperai-lemon.vercel.app'}/pricing`,
       metadata: {
         testMode: testMode ? 'true' : 'false',
-        userId: req.body.userId // Add userId to metadata
+        userId: req.body.userId
       },
     })
 
     console.log('Checkout session created:', {
       sessionId: session.id,
-      url: session.url
+      url: session.url,
+      successUrl: session.success_url,
+      cancelUrl: session.cancel_url
     })
 
     res.json({ url: session.url })
