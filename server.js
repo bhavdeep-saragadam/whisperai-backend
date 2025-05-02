@@ -217,7 +217,68 @@ app.get('/api/check-subscription/:userId', async (req, res) => {
     const { userId } = req.params
     console.log('Checking subscription for user:', userId)
 
-    const { data: subscriptions, error } = await supabase
+    // First check if user exists
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('stripe_customer_id')
+      .eq('id', userId)
+      .single()
+
+    if (userError) {
+      console.error('Error fetching user:', userError)
+      return res.status(500).json({ error: 'Database error' })
+    }
+
+    console.log('Found user:', user)
+
+    if (!user?.stripe_customer_id) {
+      console.log('No Stripe customer ID found for user')
+      return res.json({ subscriptions: [] })
+    }
+
+    // Get subscriptions from Stripe
+    const subscriptions = await stripe.subscriptions.list({
+      customer: user.stripe_customer_id,
+      status: 'active',
+      limit: 1
+    })
+
+    console.log('Found Stripe subscriptions:', subscriptions.data)
+
+    if (subscriptions.data.length > 0) {
+      const subscription = subscriptions.data[0]
+      
+      // Update subscription in Supabase
+      const { data: subscriptionData, error: upsertError } = await supabase
+        .from('subscriptions')
+        .upsert({
+          user_id: userId,
+          stripe_customer_id: user.stripe_customer_id,
+          stripe_subscription_id: subscription.id,
+          status: subscription.status,
+          price_id: subscription.items.data[0].price.id,
+          quantity: subscription.items.data[0].quantity,
+          cancel_at_period_end: subscription.cancel_at_period_end,
+          current_period_start: new Date(subscription.current_period_start * 1000).toISOString(),
+          current_period_end: new Date(subscription.current_period_end * 1000).toISOString(),
+          ended_at: subscription.ended_at ? new Date(subscription.ended_at * 1000).toISOString() : null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'stripe_subscription_id'
+        })
+
+      if (upsertError) {
+        console.error('Error upserting subscription:', upsertError)
+        return res.status(500).json({ error: 'Database error' })
+      }
+
+      console.log('Successfully updated subscription:', subscriptionData)
+      return res.json({ subscriptions: [subscriptionData] })
+    }
+
+    // If no active subscriptions in Stripe, check Supabase
+    const { data: dbSubscriptions, error } = await supabase
       .from('subscriptions')
       .select('*')
       .eq('user_id', userId)
@@ -229,8 +290,8 @@ app.get('/api/check-subscription/:userId', async (req, res) => {
       return res.status(500).json({ error: 'Database error' })
     }
 
-    console.log('Found subscriptions:', subscriptions)
-    res.json({ subscriptions })
+    console.log('Found subscriptions in database:', dbSubscriptions)
+    res.json({ subscriptions: dbSubscriptions })
   } catch (error) {
     console.error('Error checking subscription:', error)
     res.status(500).json({ error: 'Internal server error' })
